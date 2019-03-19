@@ -3,7 +3,6 @@ module CNC where
 import Data.Binary
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LB
--- import Data.ByteString.Lazy (ByteString)
 import System.Hardware.Serialport
 import System.Posix.Unistd
 import Data.Bits.Floating
@@ -30,9 +29,6 @@ data Machine = Machine {
     bitShape :: BitShape,
     chuckDiameter :: Float,
     chuckLength :: Float,
-    -- startPosition :: Vector,
-    -- feedRate :: Float,
-    -- spindleSpeed :: Float,
     boundMax :: Vector,
     boundMin :: Vector
 } deriving (Show)
@@ -85,10 +81,6 @@ instance Binary Command where
         put vec
     get = undefined
 
--- encode :: Command -> ByteString
--- encode (GetPosition) = B.pack [69, 69, 0]
--- encode (SetPosition (x, y, z)) = B.pack [69, 69, 1, floor (x * 1000), floor (y * 1000), floor (z * 1000)]
-
 ping :: Machine -> IO Bool
 ping machine = ping' machine 10
     where
@@ -113,17 +105,11 @@ flushSerial machine = withSerial (serialPort machine) mySerialPortSettings $ \ s
     r <- recv s 1000
     return ()
 
--- Gets the next complete message from the serial port.
--- Message starts with
--- receive serial
-
 setPosition :: Machine -> Vector -> IO Bool
 setPosition machine position = withSerial (serialPort machine) mySerialPortSettings $ \ s -> do
     send s $ LB.toStrict $ encode $ SetPosition position
     usleep 100000 -- This is a terrible thing to rely on.
     return True
-    -- r <- recv s 100
-    -- return $ Just $ decode $ LB.fromStrict r
 
 -- move :: Vector -> IO Bool
 -- move = undefined
