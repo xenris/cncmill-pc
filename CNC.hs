@@ -34,7 +34,7 @@ data Machine = Machine {
 } deriving (Show)
 
 myMachine = Machine {
-    serialPort = "/dev/ttyUSB0",
+    serialPort = "/dev/ttyACM0",
     bitDiameter = 3.2,
     bitLength = 20,
     bitShape = SquareBit,
