@@ -147,5 +147,5 @@ receive s n = do
         return a
     else do
         usleep 100000
-        b <- recv s n
+        b <- recv s (n - (B.length a))
         return (B.append a b)
