@@ -24,6 +24,7 @@ instance Binary Vector where
 
 data Machine = Machine {
     serialPort :: String,
+    serialPortSettings :: SerialPortSettings,
     bitDiameter :: Float,
     bitLength :: Float,
     bitShape :: BitShape,
@@ -31,10 +32,18 @@ data Machine = Machine {
     chuckLength :: Float,
     boundMax :: Vector,
     boundMin :: Vector
-} deriving (Show)
+}
 
 myMachine = Machine {
     serialPort = "/dev/ttyACM0",
+    serialPortSettings = SerialPortSettings {
+        commSpeed = CS38400,
+        bitsPerWord = 8,
+        stopb = One,
+        parity = NoParity,
+        flowControl = NoFlowControl,
+        timeout = 1
+    },
     bitDiameter = 3.2,
     bitLength = 20,
     bitShape = SquareBit,
@@ -44,96 +53,108 @@ myMachine = Machine {
     boundMin = Vector 20 20 20
 }
 
-mySerialPortSettings = SerialPortSettings {
-    commSpeed = CS38400,
-    bitsPerWord = 8,
-    stopb = One,
-    parity = NoParity,
-    flowControl = NoFlowControl,
-    timeout = 1
-}
-
 data BitShape = SquareBit | RoundBit
     deriving (Show)
 
 data Direction = Cw | Ccw
     deriving (Show)
 
+instance Binary Direction where
+    put (Cw) = put (0 :: Word8)
+    put (Ccw) = put (1 :: Word8)
+    get = undefined
+
 data Command
     = Ping
     | GetPosition
     | SetPosition Vector
     | MoveTo Vector
+    | Line Vector
+    | Circle Vector Direction
     deriving (Show)
 
+commandId :: Integral a => Command -> a
+commandId (Ping) = 0
+commandId (GetPosition) = 1
+commandId (SetPosition _) = 2
+commandId (MoveTo _) = 3
+commandId (Line _) = 4
+commandId (Circle _ _) = 5
+
+putNil = putList ([] :: [Word8])
+
 instance Binary Command where
-    put (Ping) = do
-        put (69 :: Word8)
-        put (69 :: Word8)
-        put (0 :: Word8)
-    put (GetPosition) = do
-        put (69 :: Word8)
-        put (69 :: Word8)
-        put (1 :: Word8)
-    put (SetPosition vec) = do
-        put (69 :: Word8)
-        put (69 :: Word8)
-        put (2 :: Word8)
-        put vec
-    put (MoveTo vec) = do
-        put (69 :: Word8)
-        put (69 :: Word8)
-        put (3 :: Word8)
-        put vec
+    put c = do
+        putWord8 69
+        putWord8 69
+        putWord8 (commandId c)
+        case c of
+            Ping -> putNil
+            GetPosition -> putNil
+            SetPosition vec -> put vec
+            MoveTo vec -> put vec
+            Line vec -> put vec
+            Circle vec dir -> do
+                put vec
+                put dir
     get = undefined
 
 ping :: Machine -> IO Bool
 ping machine = ping' machine 10
     where
         ping' machine 0 = return False
-        ping' machine count = withSerial (serialPort machine) mySerialPortSettings $ \ s -> do
-            send s $ LB.toStrict $ encode Ping
-            r <- receive s 3
-            if (r == B.pack [69, 69, 0]) then
-                return True
-            else
-                ping' machine (count - 1)
+        ping' machine count = do
+            s <- sendCommand machine Ping 0
+            case s of
+                Just b -> return True
+                Nothing -> ping' machine (count - 1)
 
 getPosition :: Machine -> IO (Maybe Vector)
-getPosition machine = withSerial (serialPort machine) mySerialPortSettings $ \ s -> do
-    send s $ LB.toStrict $ encode GetPosition
-    header <- receive s 3
-    if (header == B.pack [69, 69, 1]) then do
-        vect <- receive s (3 * 4)
-        return $ Just $ decode $ LB.fromStrict vect
-    else
-        return Nothing
+getPosition machine = do
+    s <- sendCommand machine GetPosition (3 * 4)
+    return $ case s of
+        Just b -> Just $ decode $ LB.fromStrict b
+        Nothing -> Nothing
 
-
-flushSerial machine = withSerial (serialPort machine) mySerialPortSettings $ \ s -> do
+flushSerial machine = withSerial (serialPort machine) (serialPortSettings machine) $ \ s -> do
     r <- recv s 1000
+    flush s
     return ()
 
 setPosition :: Machine -> Vector -> IO Bool
-setPosition machine position = withSerial (serialPort machine) mySerialPortSettings $ \ s -> do
-    send s $ LB.toStrict $ encode $ SetPosition position
-    header <- receive s 3
-    return (header == B.pack [69, 69, 2])
-
--- move :: Vector -> IO Bool
--- move = undefined
+setPosition machine vect = do
+    s <- sendCommand machine (SetPosition vect) 0
+    return $ s /= Nothing
 
 moveTo :: Machine -> Vector -> IO Bool
-moveTo machine position = withSerial (serialPort machine) mySerialPortSettings $ \ s -> do
-    send s $ LB.toStrict $ encode $ MoveTo position
-    header <- receive s 3
-    return (header == B.pack [69, 69, 3])
+moveTo machine vect = do
+    s <- sendCommand machine (MoveTo vect) 0
+    return $ s /= Nothing
 
 line :: Machine -> Vector -> IO Bool
-line = undefined
+line machine vect = do
+    s <- sendCommand machine (Line vect) 0
+    return $ s /= Nothing
 
 circle :: Machine -> Vector -> Direction -> IO Bool
-circle = undefined
+circle machine vect dir = do
+    s <- sendCommand machine (Circle vect dir) 0
+    return $ s /= Nothing
+
+sendCommand :: Machine -> Command -> Int -> IO (Maybe B.ByteString)
+sendCommand machine command n = withSerial (serialPort machine) (serialPortSettings machine) $ \ s -> do
+    send s $ LB.toStrict $ encode command
+
+    result <- receive s 3
+
+    let expected = B.pack [69, 69, fromIntegral $ commandId command]
+
+    if result == expected then do
+        answer <- receive s n
+
+        return $ if (B.length answer == n) then (Just answer) else Nothing
+    else
+        return Nothing
 
 -- Like recv, but tries again if it doesn't get enough bytes first try.
 -- Useful because sometimes recv doesn't get data of 35 bytes or more consistently.
