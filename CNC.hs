@@ -66,8 +66,8 @@ data Direction = Cw | Ccw
     deriving (Show)
 
 instance Binary Direction where
-    put (Cw) = put (0 :: Word8)
-    put (Ccw) = put (1 :: Word8)
+    put (Cw) = putWord8 0
+    put (Ccw) = putWord8 1
     get = undefined
 
 data Command
