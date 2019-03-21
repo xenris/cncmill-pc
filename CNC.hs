@@ -70,6 +70,9 @@ instance Binary Direction where
     put (Ccw) = putWord8 1
     get = undefined
 
+type Depth = Float
+type Overlap = Float
+
 data Command
     = Ping
     | Ready
@@ -89,6 +92,7 @@ commandId (SetPosition _) = 3
 commandId (MoveTo _) = 4
 commandId (Line _) = 5
 commandId (Circle _ _) = 6
+commandId (Helix _ _ _ _) = 7
 
 putNil = putList ([] :: [Word8])
 
@@ -107,6 +111,11 @@ instance Binary Command where
             Circle vec dir -> do
                 put vec
                 put dir
+            Helix vec dir dep ovr -> do
+                put vec
+                put dir
+                putFloat dep
+                putFloat ovr
     get = undefined
 
 ping :: Machine -> IO Bool
@@ -156,6 +165,11 @@ line machine vect = do
 circle :: Machine -> Vector -> Direction -> IO Bool
 circle machine vect dir = do
     s <- sendCommand machine (Circle vect dir) 0
+    return $ s /= Nothing
+
+helix :: Machine -> Vector -> Direction -> Depth -> Overlap -> IO Bool
+helix machine vect dir dep ovr = do
+    s <- sendCommand machine (Helix vect dir dep ovr) 0
     return $ s /= Nothing
 
 sendCommand :: Machine -> Command -> Int -> IO (Maybe B.ByteString)
