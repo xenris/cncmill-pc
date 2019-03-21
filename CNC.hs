@@ -13,14 +13,20 @@ data Vector = Vector Float Float Float
 
 instance Binary Vector where
     put (Vector x y z) = do
-        put (floor (x * 100000) :: Int32)
-        put (floor (y * 100000) :: Int32)
-        put (floor (z * 100000) :: Int32)
+        putFloat x
+        putFloat y
+        putFloat z
     get = do
-        x <- get :: Get Int32
-        y <- get :: Get Int32
-        z <- get :: Get Int32
-        return $ Vector ((fromIntegral x) / 100000) ((fromIntegral y) / 100000) ((fromIntegral z) / 100000)
+        x <- getFloat
+        y <- getFloat
+        z <- getFloat
+        return $ Vector x y z
+
+putFloat n = put (floor (n * 100000) :: Int32)
+
+getFloat = do
+    n <- get :: Get Int32
+    return $ (fromIntegral n) / 100000
 
 data Machine = Machine {
     serialPort :: String,
