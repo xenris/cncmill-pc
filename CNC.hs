@@ -72,20 +72,23 @@ instance Binary Direction where
 
 data Command
     = Ping
+    | Ready
     | GetPosition
     | SetPosition Vector
     | MoveTo Vector
     | Line Vector
     | Circle Vector Direction
+    | Helix Vector Direction Depth Overlap
     deriving (Show)
 
 commandId :: Integral a => Command -> a
 commandId (Ping) = 0
-commandId (GetPosition) = 1
-commandId (SetPosition _) = 2
-commandId (MoveTo _) = 3
-commandId (Line _) = 4
-commandId (Circle _ _) = 5
+commandId (Ready) = 1
+commandId (GetPosition) = 2
+commandId (SetPosition _) = 3
+commandId (MoveTo _) = 4
+commandId (Line _) = 5
+commandId (Circle _ _) = 6
 
 putNil = putList ([] :: [Word8])
 
@@ -96,6 +99,7 @@ instance Binary Command where
         putWord8 (commandId c)
         case c of
             Ping -> putNil
+            Ready -> putNil
             GetPosition -> putNil
             SetPosition vec -> put vec
             MoveTo vec -> put vec
@@ -114,6 +118,13 @@ ping machine = ping' machine 10
             case s of
                 Just b -> return True
                 Nothing -> ping' machine (count - 1)
+
+ready :: Machine -> IO (Maybe Bool)
+ready machine = do
+    s <- sendCommand machine Ready 1
+    return $ case s of
+        Just r -> Just $ decode $ LB.fromStrict r
+        Nothing -> Nothing
 
 getPosition :: Machine -> IO (Maybe Vector)
 getPosition machine = do
