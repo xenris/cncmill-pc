@@ -1,3 +1,5 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module CNC where
 
 import Data.Binary
@@ -8,25 +10,18 @@ import System.Posix.Unistd
 import Data.Bits.Floating
 import Data.Int
 
-data Vector = Vector Float Float Float
-    deriving (Show)
+newtype Number = Number Float deriving (Num, Fractional, Floating)
 
-instance Binary Vector where
-    put (Vector x y z) = do
-        putFloat x
-        putFloat y
-        putFloat z
+instance Show Number where
+    show (Number n) = show n
+
+instance Binary Number where
+    put (Number n) = put (coerceToWord n)
     get = do
-        x <- getFloat
-        y <- getFloat
-        z <- getFloat
-        return $ Vector x y z
+        n <- get :: Get Word32
+        return $ Number (coerceToFloat n)
 
-putFloat n = put (floor (n * 100000) :: Int32)
-
-getFloat = do
-    n <- get :: Get Int32
-    return $ (fromIntegral n) / 100000
+type Vector = (Number, Number, Number)
 
 data Machine = Machine {
     serialPort :: String,
@@ -41,9 +36,9 @@ data Machine = Machine {
 }
 
 myMachine = Machine {
-    serialPort = "/dev/ttyACM0",
+    serialPort = "/dev/ttyUSB0",
     serialPortSettings = SerialPortSettings {
-        commSpeed = CS38400,
+        commSpeed = CS115200,
         bitsPerWord = 8,
         stopb = One,
         parity = NoParity,
@@ -55,8 +50,8 @@ myMachine = Machine {
     bitShape = SquareBit,
     chuckDiameter = 25,
     chuckLength = 40,
-    boundMax = Vector 20 20 20,
-    boundMin = Vector 20 20 20
+    boundMax = (20, 20, 20),
+    boundMin = (20, 20, 20)
 }
 
 data BitShape = SquareBit | RoundBit
@@ -70,52 +65,155 @@ instance Binary Direction where
     put (Ccw) = putWord8 1
     get = undefined
 
-type Depth = Float
-type Overlap = Float
+data Expr
+    = T
+    | Val Number
+    | Add Expr Expr
+    | Sub Expr Expr
+    | Mul Expr Expr
+    | Div Expr Expr
+    | Sin Expr
+    | Cos Expr
+    deriving (Show)
+
+instance Num Expr where
+    (+) (Val a) (Val b) = Val (a + b)
+    (+) a b = Add a b
+    (-) (Val a) (Val b) = Val (a - b)
+    (-) a b = Sub a b
+    (*) (Val a) (Val b) = Val (a * b)
+    (*) a b = Mul a b
+    -- negate a = undefined
+    -- abs a = undefined
+    -- signum a = undefined
+    fromInteger n = Val (fromInteger n)
+
+instance Fractional Expr where
+    (/) (Val a) (Val b) = Val (a / b)
+    (/) a b = Div a b
+    -- recip :: a -> a
+    -- fromRational :: Rational -> a
+
+
+instance Floating Expr where
+    pi = Val pi
+    -- exp :: a -> a
+    -- log :: a -> a
+    -- sqrt :: a -> a
+    -- (**) :: a -> a -> a
+    -- logBase :: a -> a -> a
+    sin (Val a) = Val (sin a)
+    sin a = Sin a
+    cos (Val a) = Val (cos a)
+    cos a = Cos a
+    -- tan :: a -> a
+    -- asin :: a -> a
+    -- acos :: a -> a
+    -- atan :: a -> a
+    -- sinh :: a -> a
+    -- cosh :: a -> a
+    -- tanh :: a -> a
+    -- asinh :: a -> a
+    -- acosh :: a -> a
+    -- atanh :: a -> a
+
+instance Binary Expr where
+    put n = do
+        putWord8 $ numberId n
+        case n of
+            T -> do
+                putNil
+            Val a -> do
+                put a
+            Add a b -> do
+                put a
+                put b
+            Sub a b -> do
+                put a
+                put b
+            Mul a b -> do
+                put a
+                put b
+            Div a b -> do
+                put a
+                put b
+            Sin a -> do
+                put a
+            Cos a -> do
+                put a
+    get = do
+        c <- getWord8
+        case c of
+            0 -> return T
+            1 -> do
+                n <- get
+                return (Val n)
+            2 -> do
+                a <- get
+                b <- get
+                return (Add a b)
+
+numberId :: Integral a => Expr -> a
+numberId (T) = 0
+numberId (Val _) = 1
+numberId (Add _ _) = 2
+numberId (Sub _ _) = 3
+numberId (Mul _ _) = 4
+numberId (Div _ _) = 5
+numberId (Sin _) = 6
+numberId (Cos _) = 7
+
+-- 12 * cos (2 * T / pi) + 4 * T - 6
+
+-- exampleHelix = parametric (0, 0, 0) (12 * cos T, 12 * sin T, T / pi, 1) (0, 2 * pi)
 
 data Command
     = Ping
-    | Ready
+    | IsReady
+    | IsMoving
     | GetPosition
     | SetPosition Vector
-    | MoveTo Vector
+    | SetFeedRate Number
+    | SetSpindleSpeed Number
+    | Home
     | Line Vector
-    | Circle Vector Direction
-    | Helix Vector Direction Depth Overlap
+    | Parametric (Expr, Expr, Expr, Expr) (Expr, Expr) -- args: equation range
+    | Debug
     deriving (Show)
 
 commandId :: Integral a => Command -> a
 commandId (Ping) = 0
-commandId (Ready) = 1
-commandId (GetPosition) = 2
-commandId (SetPosition _) = 3
-commandId (MoveTo _) = 4
-commandId (Line _) = 5
-commandId (Circle _ _) = 6
-commandId (Helix _ _ _ _) = 7
+commandId (IsReady) = 1
+commandId (IsMoving) = 2
+commandId (GetPosition) = 3
+commandId (SetPosition _) = 4
+commandId (SetFeedRate _) = 5
+commandId (SetSpindleSpeed _) = 6
+commandId (Home) = 7
+commandId (Line _) = 8
+commandId (Parametric _ _) = 9
+commandId (Debug) = 10
 
-putNil = putList ([] :: [Word8])
+putNil :: Put
+putNil = return ()
 
 instance Binary Command where
     put c = do
-        putWord8 69
-        putWord8 69
+        -- putWord8 69
+        -- putWord8 69
         putWord8 (commandId c)
         case c of
             Ping -> putNil
-            Ready -> putNil
+            IsReady -> putNil
+            IsMoving -> putNil
+            Home -> putNil
             GetPosition -> putNil
             SetPosition vec -> put vec
-            MoveTo vec -> put vec
             Line vec -> put vec
-            Circle vec dir -> do
-                put vec
-                put dir
-            Helix vec dir dep ovr -> do
-                put vec
-                put dir
-                putFloat dep
-                putFloat ovr
+            Parametric equ range -> do
+                put equ
+                put range
+            Debug -> putNil
     get = undefined
 
 ping :: Machine -> IO Bool
@@ -128,9 +226,16 @@ ping machine = ping' machine 10
                 Just b -> return True
                 Nothing -> ping' machine (count - 1)
 
-ready :: Machine -> IO (Maybe Bool)
-ready machine = do
-    s <- sendCommand machine Ready 1
+isReady :: Machine -> IO (Maybe Bool)
+isReady machine = do
+    s <- sendCommand machine IsReady 1
+    return $ case s of
+        Just r -> Just $ decode $ LB.fromStrict r
+        Nothing -> Nothing
+
+isMoving :: Machine -> IO (Maybe Bool)
+isMoving machine = do
+    s <- sendCommand machine IsMoving 1
     return $ case s of
         Just r -> Just $ decode $ LB.fromStrict r
         Nothing -> Nothing
@@ -152,40 +257,75 @@ setPosition machine vect = do
     s <- sendCommand machine (SetPosition vect) 0
     return $ s /= Nothing
 
-moveTo :: Machine -> Vector -> IO Bool
-moveTo machine vect = do
-    s <- sendCommand machine (MoveTo vect) 0
-    return $ s /= Nothing
-
 line :: Machine -> Vector -> IO Bool
 line machine vect = do
     s <- sendCommand machine (Line vect) 0
     return $ s /= Nothing
 
-circle :: Machine -> Vector -> Direction -> IO Bool
-circle machine vect dir = do
-    s <- sendCommand machine (Circle vect dir) 0
+parametric :: Machine -> Vector -> (Expr, Expr, Expr, Expr) -> (Expr, Expr) -> IO Bool
+parametric machine origin equation range = do
+    s <- sendCommand machine (Parametric equation range) 0
     return $ s /= Nothing
 
-helix :: Machine -> Vector -> Direction -> Depth -> Overlap -> IO Bool
-helix machine vect dir dep ovr = do
-    s <- sendCommand machine (Helix vect dir dep ovr) 0
-    return $ s /= Nothing
+debug :: Machine -> IO Bool
+debug machine = do
+    s <- sendCommand machine Debug (-1)
+    case s of
+        Just m -> B.putStr m >> return True
+        Nothing -> return False
+
+-- line :: Machine -> Vector -> IO Bool
+-- line machine vect = do
+--     s <- sendCommand machine (Line vect) 0
+--     return $ s /= Nothing
+
+-- curve :: Machine -> Vector -> Float -> Float -> IO Bool
+-- curve machine pos angle eccen = undefined
+
+-- circle :: Machine -> Vector -> Direction -> IO Bool
+-- circle machine vect dir = do
+--     s <- sendCommand machine (Circle vect dir) 0
+--     return $ s /= Nothing
+
+-- helix :: Machine -> Vector -> Direction -> Depth -> Overlap -> IO Bool
+-- helix machine vect dir dep ovr = do
+--     s <- sendCommand machine (Helix vect dir dep ovr) 0
+--     return $ s /= Nothing
+
+-- spiral :: Machine -> Vector -> Direction -> Depth -> Overlap -> IO Bool
+-- spiral machine vect dir dep ovr = do
+--     s <- sendCommand machine (Spiral vect dir dep ovr) 0
+--     return $ s /= Nothing
+
+-- TODO Add goto, which goes to a location via a safe height.
 
 sendCommand :: Machine -> Command -> Int -> IO (Maybe B.ByteString)
 sendCommand machine command n = withSerial (serialPort machine) (serialPortSettings machine) $ \ s -> do
-    send s $ LB.toStrict $ encode command
+    send s $ LB.toStrict $ encodeCommand command
 
     result <- receive s 3
+
+    -- print result
 
     let expected = B.pack [69, 69, fromIntegral $ commandId command]
 
     if result == expected then do
-        answer <- receive s n
+        answer <- receive s (if (n >= 0) then n else 500)
 
-        return $ if (B.length answer == n) then (Just answer) else Nothing
+        -- print answer
+
+        let success = (B.length answer == n) || (n == -1)
+
+        return $ if success then (Just answer) else Nothing
     else
         return Nothing
+
+encodeCommand :: Command -> LB.ByteString
+encodeCommand command = LB.concat [header, size, bytes]
+    where
+        header = LB.pack [69, 69]
+        size = LB.singleton $ fromIntegral $ LB.length bytes
+        bytes = encode command
 
 -- Like recv, but tries again if it doesn't get enough bytes first try.
 -- Useful because sometimes recv doesn't get data of 35 bytes or more consistently.
