@@ -14,15 +14,12 @@ import Control.Concurrent
 import Data.IORef
 import Data.Word
 import Data.Foldable
--- import Data.Bits.Floating
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LB
 import System.Hardware.Serialport
 import System.Posix.Unistd
 import Control.Monad.Trans.Writer
 import qualified Graphics.Gloss as Gloss
--- import qualified Graphics.UI.GLUT as GLUT
--- import qualified Graphics.Rendering.OpenGL as GL
 
 -- main = Gloss.animate windowSettings Gloss.black animation
 --     where
@@ -64,15 +61,6 @@ data Mill = Mill {
     chuckLength :: Float
 } deriving (Show)
 
--- defaultSerialPortSettings = SerialPortSettings {
---     commSpeed = CS115200,
---     bitsPerWord = 8,
---     stopb = One,
---     parity = NoParity,
---     flowControl = NoFlowControl,
---     timeout = 1
--- }
-
 mySerialSettings = defaultSerialSettings {commSpeed = CS115200}
 
 myMachine = Mill {
@@ -99,25 +87,16 @@ data Command
     = Ping -- Say "hi" to mill. (Establish serial connection.)
     | Query
     -- | Calibrate -- Find outer bounds of mill.
-    -- | Home -- Move up, then to far corner, using sensors instead of calibrated bounds.
     | Action Int32 Int32 Int32 Int32 Int32 Int32
     | Action2 Int32 Int32 Int32 Int32 Int32 Int32 Int32 Int32 Int32
-    -- | GoTo {position::Vec3} -- Move up, move across, then move down to position.
     deriving (Show)
 
--- toLine :: [Command] -> Gloss.Path
--- toLine [] = []
--- toLine ((GoTo (x,y,z)):xs) = (realToFrac x, realToFrac y) : toLine xs
--- toLine (_:xs) = toLine xs
-
 commandId :: Integral a => Command -> a
-commandId (Ping) = 0
-commandId (Query) = 1
--- commandId (Calibrate) = 1
-commandId (Action {}) = 2
-commandId (Action2 {}) = 3
--- commandId (Home) = 2
--- commandId (GoTo {}) = 3
+commandId command = case command of
+    Ping -> 0
+    Query -> 1
+    Action {} -> 2
+    Action2 {} -> 3
 
 putNil :: Put
 putNil = return ()
@@ -127,45 +106,11 @@ putCommand c = do
     case c of
         Ping -> putNil
         Query -> putNil
-        -- Calibrate -> putNil
-        -- Home -> putNil
         Action a b c d e f -> traverse_ putInt32le [a,b,c,d,e,f]
         Action2 a b c d e f g h i -> traverse_ putInt32le [a,b,c,d,e,f,g,h,i]
-        -- GoTo (x,y,z) -> traverse_ putDoublele [x,y,z]
-
--- New version:
 
 type PortPath = String
 type Range = Vec2
-
--- connect :: PortPath -> IO ()
--- connect port = do
---     s <- openSerial port defaultSerialSettings {commSpeed = CS115200}
---     let d = LB.toStrict $ encodeCommand Ping
---     let ping = sendRecv s d 1 >>= return . (== d)
---     -- takeWhile () (replicate 10 ping)
---     -- send s $ LB.toStrict $ encodeCommand command
---     -- m <- newIORef myMachine
---     return ()
-
--- home2 :: MillM ()
--- home2 = runCommand Home
-
--- goto :: Vec3 -> MillM ()
--- goto position = runCommand (GoTo position)
-
--- path :: Range -> Expr -> Expr -> Expr -> MillM ()
--- path range x y z = undefined
-
--- Ideal:
--- duck = withMill "/dev/ttyUSB0" $ do
---     goto (40, 50, 0)
---     path (0, 1) T T 0
---     path (0, 1) (cos T) (sin T) 0
---     path (0, 1) 0 0 3
---     goto (0, 0, 0)
-
--- test = withMill "/dev/ttyUSB0" testShape
 
 circle (cx,cy,z) r = do
     goto (cx + r, cy, z+5)
@@ -177,7 +122,6 @@ circle (cx,cy,z) r = do
 
 newtype Pen a = Pen { unPen :: StateT (Double,Double,Double) MillM a }
     deriving (Functor, Applicative, Monad)
-
 
 penUp :: Pen ()
 penUp = do (x,y,z) <- Pen (get)
@@ -229,9 +173,6 @@ sierpinski' p1 p2 p3 = top : rest
             (sierpinski' p2 p23 p12)
             (sierpinski' p3 p31 p23))
 
--- sendCommands "/dev/ttyACM0" (runMillM $ setFeedRate 10 >> runPen (let l = 80; h = l * sqrt 3 / 2; apo = h/3 in sierpinski (-l/2,-apo) (l/2, -apo) (0,h-apo)))
-
-
 goto p = MillM $ tell [Goto p]
 setFeedRate fr = MillM $ tell [SetFeedRate fr]
 
@@ -282,61 +223,6 @@ gCodeToAction line = do
             values = map read (map tail words') :: [Double]
             dict = zip letters values
 
--- testShape = do
---     goto (-100, -100, 0)
---     setFeedRate 5
---     goto (80, 40, 30)
---     -- goto (150, 20, 60)
---     -- goto (0, 0, 0)
---     -- goto (300, 300, 0)
---     circle (250, 300, 0) 100
-
--- circle (cx, cy, cz) steps = traverse_ (\ i -> goto (x i, y i, 0)) [0 .. steps]
---     where
---         x i = r * cos (2 * pi * i / steps)
---         y i = r * sin (2 * pi * i / steps)
---         r = sqrt (dx * dx + dy * dy)
---         dx = abs (cx - 0) -- FIXME Need current position.
---         dy = abs (cy - 0) -- FIXME Need current position.
-
-
--- newtype MillM a = MillM {unMillM :: Writer [Command] a}
---     deriving (Functor, Applicative, Monad)
-
--- askPort :: MillM SerialPort
--- askPort = MillM ask
-
--- runCommand :: Command -> MillM ()
--- runCommand c = do port <- askPort
---                   let bytes = runPut (putCommand c)
---                   liftIO (send port bytes)
-
--- runCommand :: Command -> MillM ()
--- runCommand c = MillM (tell [c])
-
--- withMill :: PortPath -> MillM () -> IO ()
--- withMill portPath (MillM action) = do
---     let portSettings = defaultSerialSettings {commSpeed = CS115200}
---     withSerial portPath portSettings $ \ port -> do
---         let commands = execWriter action
---             sendCommand c = send port $ LB.toStrict (runPut (putCommand c))
---         mapM_ sendCommand commands
-
--- ------
-
--- ping :: Mill -> IO Bool
--- ping mill = ping' mill 10
---     where
---         ping' mill 0 = return False
---         ping' mill count = do
---             s <- sendCommand mill Ping 0
---             case s of
---                 Just b -> return True
-                -- Nothing -> ping' mill (count - 1)
-
--- ping :: PortPath -> IO Bool
--- ping portPath = ping' 10
-
 ping :: PortPath -> IO Bool
 ping portPath = withSerial portPath mySerialSettings $ \ s -> ping' s 10
     where
@@ -346,31 +232,6 @@ ping portPath = withSerial portPath mySerialSettings $ \ s -> ping' s 10
             case response of
                 Just _ -> return True
                 Nothing -> ping' s (count - 1)
-
-----
-
-
--- home :: Mill -> IO Bool
--- home mill = do
---     s <- sendCommand mill Home 0
---     return $ s /= Nothing
-
--- line :: Mill -> Int16 -> Int16 -> Int16 -> Word16 -> Word16 -> Word16 -> IO Bool
--- line mill x y z sx sy sz = do
---     s <- sendCommand mill (Line x y z sx sy sz) 0
---     return $ s /= Nothing
-
--- debug :: Mill -> IO Bool
--- debug mill = do
---     s <- sendCommand mill Debug (-1)
---     case s of
---         Just m -> B.putStr m >> return True
---         Nothing -> return False
-
-flushSerial mill = withSerial (serialPort mill) (serialPortSettings mill) $ \ s -> do
-    r <- recv s 1000
-    flush s
-    return ()
 
 sendCommands :: PortPath -> [Command] -> IO ()
 sendCommands portPath commands = traverse_ (sendCommand portPath) commands
@@ -382,7 +243,6 @@ waitForSpace serialPort = do
     when (space == 0) $ do
         threadDelay 100
         waitForSpace serialPort
-
 
 sendCommand' :: SerialPort -> Command -> IO (Maybe B.ByteString)
 sendCommand' serialPort command = do
@@ -411,30 +271,16 @@ sendCommand portPath command = withSerial portPath mySerialSettings $ \ s -> do
         Just bs -> pure (Just bs)
         Nothing -> error ("Failed to send command: " ++ show command)
 
-expectedReplySize Ping = 0
-expectedReplySize Query = 2
-expectedReplySize Action {} = 0
-expectedReplySize Action2 {} = 0
+expectedReplySize command = case command of
+    Ping -> 0
+    Query -> 2
+    Action {} -> 0
+    Action2 {} -> 0
 
 sendRecv :: SerialPort -> B.ByteString -> Int -> IO B.ByteString
 sendRecv serialPort sendBytes recvLength = do
     send serialPort sendBytes
-
     receive serialPort recvLength
-
-    -- return $ if B.length result == recvLength then Just result else Nothing
-
-    -- let expected = B.pack [69, 69, fromIntegral $ commandId command]
-
-    -- if result == expected then do
-    --     answer <- receive s (if (n >= 0) then n else 500)
-
-    --     let success = (B.length answer == n) || (n == -1)
-
-    --     return $ if success then (Just answer) else Nothing
-    -- else
-    --     return Nothing
-
 
 encodeCommand :: Command -> LB.ByteString
 encodeCommand command = LB.concat [header, bytes]
