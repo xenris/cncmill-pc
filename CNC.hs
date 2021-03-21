@@ -101,6 +101,7 @@ data Command
     -- | Calibrate -- Find outer bounds of mill.
     -- | Home -- Move up, then to far corner, using sensors instead of calibrated bounds.
     | Action Int32 Int32 Int32 Int32 Int32 Int32
+    | Action2 Int32 Int32 Int32 Int32 Int32 Int32 Int32 Int32 Int32
     -- | GoTo {position::Vec3} -- Move up, move across, then move down to position.
     deriving (Show)
 
@@ -114,6 +115,7 @@ commandId (Ping) = 0
 commandId (Query) = 1
 -- commandId (Calibrate) = 1
 commandId (Action {}) = 2
+commandId (Action2 {}) = 3
 -- commandId (Home) = 2
 -- commandId (GoTo {}) = 3
 
@@ -127,7 +129,8 @@ putCommand c = do
         Query -> putNil
         -- Calibrate -> putNil
         -- Home -> putNil
-        Action a b c d e f -> traverse_ putInt32le [a,b,c] >> traverse_ putInt32le [d,e,f]
+        Action a b c d e f -> traverse_ putInt32le [a,b,c,d,e,f]
+        Action2 a b c d e f g h i -> traverse_ putInt32le [a,b,c,d,e,f,g,h,i]
         -- GoTo (x,y,z) -> traverse_ putDoublele [x,y,z]
 
 -- New version:
@@ -401,6 +404,7 @@ sendCommand :: PortPath -> Command ->  IO (Maybe B.ByteString)
 sendCommand portPath command = withSerial portPath mySerialSettings $ \ s -> do
     case command of
         Action{} -> waitForSpace s
+        Action2{} -> waitForSpace s
         _ -> pure()
     response <- sendCommand' s command
     case response of
@@ -410,6 +414,7 @@ sendCommand portPath command = withSerial portPath mySerialSettings $ \ s -> do
 expectedReplySize Ping = 0
 expectedReplySize Query = 2
 expectedReplySize Action {} = 0
+expectedReplySize Action2 {} = 0
 
 sendRecv :: SerialPort -> B.ByteString -> Int -> IO B.ByteString
 sendRecv serialPort sendBytes recvLength = do
