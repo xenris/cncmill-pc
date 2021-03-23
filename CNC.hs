@@ -174,38 +174,42 @@ getCurrentPosition = MillM $ liftF (GetCurrentPosition id)
 mmPerTick :: Double
 mmPerTick = 1.25e-3
 
+runMove :: Vec3 -> Double -> Vec3 -> ([Command], Vec3)
+runMove (x1,y1,z1) fr (x2,y2,z2)
+  -- Skip null action
+  | maximum [abs dx, abs dy, abs dz] == 0 = ([], (x1,y1,z1))
+  -- Move in a line
+  | maximum [delayX, delayY, delayZ] > 0 = ([line], (x2',y2',z2'))
+  -- otherwise throw an error if all delays are 0
+  | otherwise = error (show ((dx^2 + dy^2 + dz^2), distance, time, time'))
+  where
+      dx = round $ (x2 - x1) / mmPerTick :: Int64
+      dy = round $ (y2 - y1) / mmPerTick :: Int64
+      dz = round $ (z2 - z1) / mmPerTick :: Int64
+      x2' = x1 + fromIntegral dx * mmPerTick
+      y2' = y1 + fromIntegral dy * mmPerTick
+      z2' = z1 + fromIntegral dz * mmPerTick
+      distance = sqrt (fromIntegral (dx^2 + dy^2 + dz^2)) * mmPerTick
+      time = distance / fr -- seconds
+      time' = round (time * 16e6) -- clock cycles
+      delayX = if dx /= 0 then time' `div` abs dx else 0
+      delayY = if dy /= 0 then time' `div` abs dy else 0
+      delayZ = if dz /= 0 then time' `div` abs dz else 0
+      line = Action {
+        dx = (fromIntegral dx),
+        dy = (fromIntegral dy),
+        dz = (fromIntegral dz),
+        delayX = (fromIntegral delayX),
+        delayY = (fromIntegral delayY),
+        delayZ = (fromIntegral delayZ)}
+
 runMillM :: MillM () -> [Command]
 runMillM (MillM action) = go (0,0,0) 0.5 action
     where go _ _ (Pure a) = []
           go pos _ (Free (SetFeedRate newFr k)) = go pos newFr k
           go pos fr (Free (GetCurrentPosition k)) = go pos fr (k pos)
-          go (x1,y1,z1) fr (Free (Goto (x2,y2,z2) k))
-            -- Skip null action
-            | maximum [abs dx, abs dy, abs dz] == 0 = go (x1,y1,z1) fr k
-            -- Move in a line
-            | maximum [delayX, delayY, delayZ] > 0 = line : go (x2',y2',z2') fr k
-            -- otherwise throw an error if all delays are 0
-            | otherwise = error (show ((dx^2 + dy^2 + dz^2), distance, time, time'))
-            where
-                dx = round $ (x2 - x1) / mmPerTick :: Int64
-                dy = round $ (y2 - y1) / mmPerTick :: Int64
-                dz = round $ (z2 - z1) / mmPerTick :: Int64
-                x2' = x1 + fromIntegral dx * mmPerTick
-                y2' = y1 + fromIntegral dy * mmPerTick
-                z2' = z1 + fromIntegral dz * mmPerTick
-                distance = sqrt (fromIntegral (dx^2 + dy^2 + dz^2)) * mmPerTick
-                time = distance / fr -- seconds
-                time' = round (time * 16e6) -- clock cycles
-                delayX = if dx /= 0 then time' `div` abs dx else 0
-                delayY = if dy /= 0 then time' `div` abs dy else 0
-                delayZ = if dz /= 0 then time' `div` abs dz else 0
-                line = Action {
-                  dx = (fromIntegral dx),
-                  dy = (fromIntegral dy),
-                  dz = (fromIntegral dz),
-                  delayX = (fromIntegral delayX),
-                  delayY = (fromIntegral delayY),
-                  delayZ = (fromIntegral delayZ)}
+          go pos fr (Free (Goto pos2 k)) = case runMove pos fr pos2 of
+                                             (actions, pos2') -> actions ++ go pos2' fr k
 
 gCodeToAction :: String -> MillM ()
 gCodeToAction line = do
