@@ -151,6 +151,33 @@ sierp =
 
 -- sendCommands (runMillM $ setFeedRate 10 >> runPen (let l = 80; h = l * sqrt 3 / 2; apo = h/3 in sierpinski (-l/2,-apo) (l/2, -apo) (0,h-apo)))
 
+fromTo :: Double -> Double -> Double -> [Double]
+fromTo a b step
+  | a < b = takeWhile (<b) [a + fromIntegral i * step | i <- [0..]] ++ [b]
+  | a > b = takeWhile (>b) [a - fromIntegral i * step | i <- [0..]] ++ [b]
+
+runGasket :: IO ()
+runGasket = sendCommands (runMillM gasket)
+
+gasket :: MillM ()
+gasket = do
+  setFeedRate 4.0
+  let bitSize = 3.2/2
+  goto (10/2 + bitSize, 0, 0)
+  goto (10/2 + bitSize, 0, -9.0)
+  let circle z r =
+        for_ [1..100] $ \i -> do
+        let theta = 2 * pi * fromIntegral i / 100
+        goto (r * cos theta, r * sin theta, z)
+  for_ (fromTo (10.0/2) (8.0/2) 0.3) $ \r -> do
+    circle (-9.0) (r + bitSize)
+  goto (8.0/2 + bitSize, 0, -5.8)
+  for_ (fromTo (8.0/2) (6.0/2) 0.3) $ \r -> do
+    circle (-5.8) (r + bitSize)
+  goto (8.0/2 + bitSize, 0, -5.8)
+  goto (8.0/2 + bitSize, 0, 0)
+
+
 -- Basic operations.
 -- Being a functor allows these to have a return value
 -- All units in mm, mm/s
