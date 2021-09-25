@@ -75,28 +75,32 @@ ping serialPort = loop 10
                 Nothing -> loop (count - 1)
 
 sendCommands :: [Command] -> IO ()
-sendCommands commands = withCNC $ \serialPort -> do
+sendCommands commands = withCNC $ \ serialPort -> do
   ping serialPort
-  traverse_ (sendCommand serialPort) commands
+  sendCommands' 0 commands serialPort
+
+sendCommands' :: Int -> [Command] -> SerialPort -> IO ()
+sendCommands' count [] serialPort = return ()
+sendCommands' count commands serialPort = do
+    traverse_ (sendCommand serialPort) (take count commands)
+    space <- querySpace serialPort
+    if space == 0 then do
+        threadDelay 1 -- TODO Try without delay.
+        sendCommands' space (drop count commands) serialPort
+    else do
+        sendCommands' space (drop count commands) serialPort
 
 sendCommand :: SerialPort -> Command ->  IO (Maybe B.ByteString)
 sendCommand serialPort command = do
-    case command of
-        Action{} -> waitForSpace serialPort
-        _ -> pure()
     response <- sendCommand' serialPort command
     case response of
         Just bs -> pure (Just bs)
         Nothing -> error ("Failed to send command: " ++ show command)
 
-waitForSpace :: SerialPort -> IO ()
-waitForSpace serialPort = do
+querySpace :: SerialPort -> IO Int
+querySpace serialPort = do
     Just response <- sendCommand' serialPort Query
-    let space = runGet getInt16le (LB.fromStrict response)
-    when (space == 0) $ do
-        threadDelay 100
-        waitForSpace serialPort
-
+    return $ fromIntegral $ runGet getInt16le (LB.fromStrict response)
 
 sendCommand' :: SerialPort -> Command -> IO (Maybe B.ByteString)
 sendCommand' serialPort command = do
@@ -128,6 +132,6 @@ receive s n = do
     if (B.length a) == n then
         return a
     else do
-        usleep 100000
+        threadDelay 1
         b <- recv s (n - (B.length a))
         return (B.append a b)
