@@ -258,6 +258,7 @@ gasket = do
 -- All units in mm, mm/s
 data MillF a = Goto Vec3 a
              | SetFeedRate Double a
+             | SetCurrentPosition Vec3 a
              | GetCurrentPosition (Vec3 -> a) -- return value is Vec3
              deriving Functor
 
@@ -269,6 +270,9 @@ goto p = MillM $ liftF (Goto p ())
 
 setFeedRate :: Double -> MillM ()
 setFeedRate fr = MillM $ liftF (SetFeedRate fr ())
+
+setCurrentPosition :: Vec3 -> MillM ()
+setCurrentPosition p = MillM $ liftF (SetCurrentPosition p ())
 
 getCurrentPosition :: MillM Vec3
 getCurrentPosition = MillM $ liftF (GetCurrentPosition id)
@@ -309,6 +313,7 @@ runMillM :: MillM () -> [Command]
 runMillM (MillM action) = go (0,0,0) 0.5 action
     where go _ _ (Pure a) = []
           go pos _ (Free (SetFeedRate newFr k)) = go pos newFr k
+          go _ fr (Free (SetCurrentPosition newPos k)) = go newPos fr k
           go pos fr (Free (GetCurrentPosition k)) = go pos fr (k pos)
           go pos fr (Free (Goto pos2 k)) = case runMove pos fr pos2 of
                                              (actions, pos2') -> actions ++ go pos2' fr k
