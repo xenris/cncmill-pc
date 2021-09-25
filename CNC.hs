@@ -57,11 +57,86 @@ main = do
 --     sendCommands (runMillM $ traverse_ gCodeToAction code)
 --     -- traverse_ print (runMillM $ traverse_ gCodeToAction code)
 
+runGCode :: String -> IO ()
+runGCode gcode = sendCommands $ runMillM $ traverse_ parseGCodeLine (lines gcode)
+
+parseGCodeLine :: String -> MillM ()
+parseGCodeLine s = runCommand $ words $ cleanLine s
+
+runCommand :: [String] -> MillM ()
+runCommand xs = do
+    (sx, sy, sz) <- getCurrentPosition
+
+    let mg = find ((== 'G') . head) xs
+        mx = find ((== 'X') . head) xs
+        my = find ((== 'Y') . head) xs
+        mz = find ((== 'Z') . head) xs
+        mf = find ((== 'F') . head) xs
+        mi = find ((== 'I') . head) xs
+        mj = find ((== 'J') . head) xs
+        x = maybe sx (read . tail) mx
+        y = maybe sy (read . tail) my
+        z = maybe sz (read . tail) mz
+        i = maybe 0 (read . tail) mi
+        j = maybe 0 (read . tail) mj
+        cx = sx + i
+        cy = sy + j
+        angle = atan2 (-j) (-i) - atan2 (y) (x)
+
+    maybe (return ()) (setFeedRate . (/ 60) . read . tail) mf
+
+    case mg of
+        Just "G00" -> goto (x, y, z)
+        Just "G01" -> goto (x, y, z)
+        Just "G02" -> circleG (x, y) (i, j) True
+        Just "G03" -> circleG (x, y) (i, j) False
+        _ -> return ()
+
+cleanLine :: String -> String
+cleanLine [] = []
+cleanLine ('%':xs) = cleanLine xs
+cleanLine ('(':xs) = cleanLine $ skipComment xs 1
+cleanLine (')':xs) = error "Unexpected ')' found"
+cleanLine (x:xs) = x : cleanLine xs
+
+skipComment :: String -> Int -> String
+skipComment xs 0 = xs
+skipComment [] n = error "Expected ')'"
+skipComment ('(':xs) n = skipComment xs (n + 1)
+skipComment (')':xs) n = skipComment xs (n - 1)
+skipComment (_:xs) n = skipComment xs n
+
 shape1 :: MillM ()
 shape1 = do
     setFeedRate 15
     runPen Down (let l = 80; h = l * sqrt 3 / 2; apo = h/3 in
                     sierpinski (-l/2,-apo) (l/2, -apo) (0,h-apo) 4)
+
+-- circle :: Vec2 -> Double -> Double -> MillM ()
+-- circle (cx, cy) angle depth = do
+--     (x, y, z) <- getCurrentPosition
+--     let r = sqrt ((cx - x) * (cx - x) + (cy - y) * (cy - y))
+--         startAngle = atan2 (y - cy) (x - cx)
+--         steps = round (2 * r * (abs angle + 1)) :: Int
+--     for_ [1..steps] $ \ i -> do
+--         let t = startAngle - angle * fromIntegral i / fromIntegral steps
+--             d = depth * fromIntegral i / fromIntegral steps
+--         goto (cx + r * cos t, cy + r * sin t, z + d)
+
+circleG :: Vec2 -> Vec2 -> Bool -> MillM ()
+circleG (x, y) (i, j) clockwise = do
+    (sx, sy, sz) <- getCurrentPosition
+    let r = sqrt (i * i + j * j)
+        startAngle = atan2 (sy - cy) (sx - cx)
+        steps = ceiling (r * (abs angle) + 1) :: Int
+        cx = sx + i
+        cy = sy + j
+        endAngle = atan2 (y - cy) (x - cx)
+        angle' = endAngle - startAngle
+        angle = angle' + (if angle' > pi then -2 * pi else if angle' < (-pi) then 2 * pi else 0)
+    for_ [1..steps] $ \ i -> do
+        let t = startAngle + angle * fromIntegral i / fromIntegral steps
+        goto (cx + r * cos t, cy + r * sin t, sz)
 
 data PenState = Up | Down
   deriving Eq
